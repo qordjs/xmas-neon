@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>XMAS // NEON</title>
+
+  <!-- importmap: addons 내부에서 "three"를 다시 import해도 해결됨 -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(900px 500px at 20% 10%, rgba(120, 80, 255, 0.30), transparent 60%),
+        radial-gradient(700px 450px at 80% 20%, rgba(0, 255, 220, 0.18), transparent 60%),
+        radial-gradient(800px 600px at 50% 90%, rgba(255, 40, 120, 0.15), transparent 60%),
+        #06050b;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", sans-serif;
+    }
+    canvas { display: block; }
+
+    /* 전자 스캔라인 + 비네팅 */
+    body::before {
+      content: "";
+      position: fixed; inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(to bottom, rgba(255,255,255,0.05), rgba(255,255,255,0) 20%, rgba(0,0,0,0.2)),
+        repeating-linear-gradient(
+          to bottom,
+          rgba(255,255,255,0.045) 0px,
+          rgba(255,255,255,0.045) 1px,
+          rgba(0,0,0,0) 3px,
+          rgba(0,0,0,0) 6px
+        );
+      mix-blend-mode: overlay;
+      opacity: 0.25;
+    }
+    body::after{
+      content:"";
+      position: fixed; inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at 50% 45%, transparent 55%, rgba(0,0,0,0.55));
+      opacity: 0.8;
+    }
+
+    #hud {
+      position: fixed;
+      left: 16px; top: 16px;
+      display: flex; gap: 10px; align-items: center;
+      padding: 10px 12px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.14);
+      backdrop-filter: blur(12px);
+      color: rgba(255,255,255,0.92);
+      z-index: 10;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+    #hud .tag {
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(0,255,220,0.22), rgba(160,70,255,0.18));
+      border: 1px solid rgba(255,255,255,0.10);
+    }
+    #hud button {
+      cursor: pointer;
+      border-radius: 14px;
+      padding: 9px 11px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.10);
+      color: rgba(255,255,255,0.95);
+      font-weight: 700;
+      transition: transform 120ms ease, background 120ms ease;
+    }
+    #hud button:hover {
+      background: rgba(255,255,255,0.16);
+      transform: translateY(-1px);
+    }
+    #hud input[type="range"]{
+      width: 110px;
+      accent-color: #7bffef;
+    }
+    #tip {
+      position: fixed;
+      right: 16px; bottom: 16px;
+      color: rgba(255,255,255,0.78);
+      font-size: 12px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.22);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(10px);
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div class="tag">XMAS // NEON</div>
+    <button id="btnSanta">SANTA</button>
+    <button id="btnRudolph">RUDOLPH</button>
+    <span style="opacity:.8;font-size:12px">GLOW</span>
+    <input id="glow" type="range" min="0" max="2" step="0.01" value="1.05" />
+  </div>
+  <div id="tip">드래그: 회전 · 휠: 줌 · 버튼: 전환</div>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+    import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+    import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+
+    // ---------- renderer / scene / camera
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x05040b, 0.085);
+
+    const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 80);
+    camera.position.set(0, 1.35, 6.2);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(0, 1.25, 0);
+
+    // ---------- lights (neon vibe)
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    scene.add(ambient);
+
+    const key = new THREE.DirectionalLight(0xffffff, 1.15);
+    key.position.set(3.5, 6, 2.5);
+    scene.add(key);
+
+    const cyan = new THREE.PointLight(0x00ffe0, 1.35, 18);
+    cyan.position.set(2.6, 2.0, -1.8);
+    scene.add(cyan);
+
+    const mag = new THREE.PointLight(0xff2aa6, 1.1, 18);
+    mag.position.set(-2.7, 1.2, 1.8);
+    scene.add(mag);
+
+    const rim = new THREE.DirectionalLight(0x88aaff, 0.65);
+    rim.position.set(-4, 2, -3);
+    scene.add(rim);
+
+    // ---------- neon floor grid
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(40, 40, 1, 1),
+      new THREE.MeshStandardMaterial({ color: 0x050615, roughness: 1.0, metalness: 0.0 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = 0;
+    scene.add(floor);
+
+    const grid = new THREE.GridHelper(40, 120, 0x00ffe0, 0x7a40ff);
+    grid.position.y = 0.01;
+    grid.material.transparent = true;
+    grid.material.opacity = 0.28;
+    scene.add(grid);
+
+    // subtle horizon glow ring
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(2.2, 3.3, 64),
+      new THREE.MeshBasicMaterial({ color: 0x00ffe0, transparent: true, opacity: 0.12 })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.02;
+    scene.add(ring);
+
+    // ---------- postprocessing bloom
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloom = new UnrealBloomPass(
+      new THREE.Vector2(innerWidth, innerHeight),
+      1.05,   // strength
+      0.9,    // radius
+      0.15    // threshold
+    );
+    composer.addPass(bloom);
+
+    const glowSlider = document.getElementById("glow");
+    glowSlider.addEventListener("input", () => {
+      bloom.strength = Number(glowSlider.value);
+    });
+
+    // ---------- materials (electronic accent)
+    const matRed = new THREE.MeshStandardMaterial({ color: 0xd61f2c, roughness: 0.45, metalness: 0.08, emissive: 0x220006, emissiveIntensity: 0.25 });
+    const matWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.65, metalness: 0.02, emissive: 0x07070a, emissiveIntensity: 0.12 });
+    const matSkin = new THREE.MeshStandardMaterial({ color: 0xf2c9a0, roughness: 0.72, metalness: 0.0 });
+    const matBrown = new THREE.MeshStandardMaterial({ color: 0x7a4b2a, roughness: 0.65, metalness: 0.02, emissive: 0x090505, emissiveIntensity: 0.10 });
+    const matDark = new THREE.MeshStandardMaterial({ color: 0x1b1b22, roughness: 0.7, metalness: 0.08 });
+    const matGold = new THREE.MeshStandardMaterial({ color: 0xd6b24a, roughness: 0.25, metalness: 0.7, emissive: 0x2a1a00, emissiveIntensity: 0.18 });
+    const matNeonCyan = new THREE.MeshStandardMaterial({ color: 0x00ffe0, roughness: 0.25, metalness: 0.25, emissive: 0x00ffe0, emissiveIntensity: 1.1 });
+    const matNeonPink = new THREE.MeshStandardMaterial({ color: 0xff2aa6, roughness: 0.25, metalness: 0.25, emissive: 0xff2aa6, emissiveIntensity: 0.95 });
+
+    function makeSantaNeon() {
+      const g = new THREE.Group();
+
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 0.92, 8, 18), matRed);
+      body.position.y = 1.05;
+      g.add(body);
+
+      // hologram trim
+      const trim = new THREE.Mesh(new THREE.TorusGeometry(0.56, 0.06, 12, 72), matNeonCyan);
+      trim.rotation.x = Math.PI / 2;
+      trim.position.y = 0.95;
+      g.add(trim);
+
+      const belt = new THREE.Mesh(new THREE.TorusGeometry(0.56, 0.11, 16, 72), matDark);
+      belt.rotation.x = Math.PI / 2;
+      belt.position.y = 0.95;
+      g.add(belt);
+
+      const buckle = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.05, 12, 28), matGold);
+      buckle.rotation.x = Math.PI / 2;
+      buckle.position.set(0, 0.95, 0.62);
+      g.add(buckle);
+
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.38, 26, 26), matSkin);
+      head.position.y = 1.85;
+      g.add(head);
+
+      const beard = new THREE.Mesh(
+        new THREE.SphereGeometry(0.42, 26, 26, 0, Math.PI * 2, 0, Math.PI * 0.58),
+        matWhite
+      );
+      beard.position.set(0, 1.74, 0.05);
+      beard.rotation.x = Math.PI;
+      g.add(beard);
+
+      // eyes
+      const eyeGeo = new THREE.SphereGeometry(0.045, 16, 16);
+      const eyeL = new THREE.Mesh(eyeGeo, matDark);
+      const eyeR = new THREE.Mesh(eyeGeo, matDark);
+      eyeL.position.set(-0.12, 1.92, 0.29);
+      eyeR.position.set( 0.12, 1.92, 0.29);
+      g.add(eyeL, eyeR);
+
+      // tiny neon cheeks
+      const cheekGeo = new THREE.SphereGeometry(0.05, 16, 16);
+      const chL = new THREE.Mesh(cheekGeo, matNeonPink);
+      const chR = new THREE.Mesh(cheekGeo, matNeonPink);
+      chL.position.set(-0.18, 1.82, 0.29);
+      chR.position.set( 0.18, 1.82, 0.29);
+      chL.scale.set(1, 0.6, 0.8);
+      chR.scale.set(1, 0.6, 0.8);
+      g.add(chL, chR);
+
+      // hat
+      const hatBase = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.08, 16, 64), matWhite);
+      hatBase.rotation.x = Math.PI / 2;
+      hatBase.position.set(0, 2.13, 0.02);
+      g.add(hatBase);
+
+      const hat = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.62, 26), matRed);
+      hat.position.set(0, 2.44, 0.0);
+      hat.rotation.z = -0.35;
+      g.add(hat);
+
+      const pom = new THREE.Mesh(new THREE.SphereGeometry(0.11, 18, 18), matNeonCyan);
+      pom.position.set(-0.22, 2.62, 0.0);
+      g.add(pom);
+
+      // arms
+      const armGeo = new THREE.CapsuleGeometry(0.13, 0.48, 6, 14);
+      const armL = new THREE.Mesh(armGeo, matRed);
+      const armR = new THREE.Mesh(armGeo, matRed);
+      armL.position.set(-0.62, 1.25, 0.0);
+      armR.position.set( 0.62, 1.25, 0.0);
+      armL.rotation.z = 0.35;
+      armR.rotation.z = -0.35;
+      g.add(armL, armR);
+
+      const gloveGeo = new THREE.SphereGeometry(0.16, 16, 16);
+      const gloveL = new THREE.Mesh(gloveGeo, matDark);
+      const gloveR = new THREE.Mesh(gloveGeo, matDark);
+      gloveL.position.set(-0.82, 1.02, 0.05);
+      gloveR.position.set( 0.82, 1.02, 0.05);
+      g.add(gloveL, gloveR);
+
+      // chest emblem
+      const emblem = new THREE.Mesh(new THREE.CircleGeometry(0.16, 32), matNeonCyan);
+      emblem.position.set(0, 1.33, 0.55);
+      g.add(emblem);
+
+      g.userData.kind = "santa";
+      return g;
+    }
+
+    function makeRudolphNeon() {
+      const g = new THREE.Group();
+
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 0.86, 8, 18), matBrown);
+      body.position.y = 1.05;
+      g.add(body);
+
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 26, 26), matBrown);
+      head.position.y = 1.85;
+      g.add(head);
+
+      const snout = new THREE.Mesh(new THREE.SphereGeometry(0.28, 22, 22), matBrown);
+      snout.scale.set(1.15, 0.85, 1.25);
+      snout.position.set(0, 1.72, 0.35);
+      g.add(snout);
+
+      // neon nose (electronic LED vibe)
+      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.105, 20, 20), matNeonPink);
+      nose.position.set(0, 1.72, 0.62);
+      g.add(nose);
+
+      // eyes
+      const eyeGeo = new THREE.SphereGeometry(0.05, 16, 16);
+      const eyeL = new THREE.Mesh(eyeGeo, matDark);
+      const eyeR = new THREE.Mesh(eyeGeo, matDark);
+      eyeL.position.set(-0.14, 1.92, 0.30);
+      eyeR.position.set( 0.14, 1.92, 0.30);
+      g.add(eyeL, eyeR);
+
+      // ears
+      const earGeo = new THREE.SphereGeometry(0.16, 18, 18);
+      const earL = new THREE.Mesh(earGeo, matBrown);
+      const earR = new THREE.Mesh(earGeo, matBrown);
+      earL.scale.set(0.6, 1.1, 0.5);
+      earR.scale.set(0.6, 1.1, 0.5);
+      earL.position.set(-0.32, 2.05, 0.05);
+      earR.position.set( 0.32, 2.05, 0.05);
+      g.add(earL, earR);
+
+        // antlers (NEON)
+    const antlerMat = new THREE.MeshStandardMaterial({
+    color: 0x5b3a22,
+    roughness: 0.35,
+    metalness: 0.25,
+    emissive: 0x00ffe0,          // 뿔에서 빛
+    emissiveIntensity: 0.9       // 기본 밝기
+    });
+
+      function antler(side) {
+        const a = new THREE.Group();
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.55, 10), antlerMat);
+        base.position.y = 0.25;
+        base.rotation.z = 0.2 * side;
+        a.add(base);
+
+        const b1 = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.28, 10), antlerMat);
+        b1.position.set(0.12 * side, 0.42, 0.0);
+        b1.rotation.z = 1.0 * side;
+        a.add(b1);
+
+        const b2 = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.22, 10), antlerMat);
+        b2.position.set(0.10 * side, 0.58, 0.0);
+        b2.rotation.z = 1.2 * side;
+        a.add(b2);
+
+        a.position.set(0.18 * side, 2.25, -0.05);
+        return a;
+      }
+      g.add(antler(-1), antler(1));
+
+      // neon scarf ring
+      const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.56, 0.09, 16, 64), matNeonCyan);
+      scarf.rotation.x = Math.PI / 2;
+      scarf.position.y = 1.43;
+      g.add(scarf);
+
+      const tail = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 16), matWhite);
+      tail.position.set(0, 0.7, -0.6);
+      g.add(tail);
+
+      // side neon badges
+      const badgeGeo = new THREE.CircleGeometry(0.12, 28);
+      const bL = new THREE.Mesh(badgeGeo, matNeonPink);
+      const bR = new THREE.Mesh(badgeGeo, matNeonPink);
+      bL.position.set(-0.58, 1.0, 0.05);
+      bR.position.set( 0.58, 1.0, 0.05);
+      bL.rotation.y = Math.PI / 2;
+      bR.rotation.y = -Math.PI / 2;
+      g.add(bL, bR);
+
+      g.userData.kind = "rudolph";
+      return g;
+    }
+
+    // ---------- particles (snow -> cyber sparks)
+    const sparkCount = 1600;
+    const sparkGeo = new THREE.BufferGeometry();
+    const pos = new Float32Array(sparkCount * 3);
+    const vel = new Float32Array(sparkCount);
+    const lane = new Float32Array(sparkCount);
+
+    for (let i = 0; i < sparkCount; i++) {
+      pos[i * 3 + 0] = (Math.random() - 0.5) * 18;
+      pos[i * 3 + 1] = Math.random() * 9 + 0.5;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 18;
+      vel[i] = 0.35 + Math.random() * 1.1;
+      lane[i] = Math.random() < 0.5 ? 0 : 1;
+    }
+    sparkGeo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+
+    const sparkMat = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 0.028,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    const sparks = new THREE.Points(sparkGeo, sparkMat);
+    scene.add(sparks);
+
+    // ---------- character switch
+    let character = makeSantaNeon();
+    scene.add(character);
+
+    function setCharacter(kind) {
+      scene.remove(character);
+      character = (kind === "santa") ? makeSantaNeon() : makeRudolphNeon();
+      scene.add(character);
+    }
+
+    document.getElementById("btnSanta").addEventListener("click", () => setCharacter("santa"));
+    document.getElementById("btnRudolph").addEventListener("click", () => setCharacter("rudolph"));
+
+    // ---------- resize
+    addEventListener("resize", () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+      composer.setSize(innerWidth, innerHeight);
+      bloom.setSize(innerWidth, innerHeight);
+    });
+
+    // ---------- animate
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const t = clock.getElapsedTime();
+      const dt = clock.getDelta();
+
+      // subtle neon color breathing
+      const hue = (t * 0.04) % 1;
+      const c1 = new THREE.Color().setHSL(hue, 1.0, 0.55);
+      const c2 = new THREE.Color().setHSL((hue + 0.45) % 1, 1.0, 0.55);
+      cyan.color.copy(c1);
+      mag.color.copy(c2);
+
+      // grid pulse
+      grid.material.opacity = 0.22 + Math.sin(t * 1.7) * 0.05;
+
+      // character float + idle rotate
+      character.position.y = Math.sin(t * 1.4) * 0.05;
+      character.rotation.y = Math.sin(t * 0.75) * 0.22;
+
+      // rudolph nose blink a bit (if exists)
+      character.traverse((o) => {
+        if (o.material && o.material.emissive) {
+          // neon materials pulse
+          if (o.material.emissiveIntensity >= 0.9) {
+            o.material.emissiveIntensity = 0.85 + Math.sin(t * 4.0) * 0.25;
+          }
+        }
+      });
+
+      // sparks drift
+      const p = sparkGeo.attributes.position;
+      for (let i = 0; i < sparkCount; i++) {
+        // 내려오는 느낌 + 살짝 좌우 슬라이드
+        p.array[i * 3 + 1] -= vel[i] * 0.018;
+        p.array[i * 3 + 0] += Math.sin(t * 0.7 + i * 0.01) * (lane[i] ? 0.0012 : -0.0012);
+        p.array[i * 3 + 2] += Math.cos(t * 0.6 + i * 0.01) * (lane[i] ? 0.0010 : -0.0010);
+
+        if (p.array[i * 3 + 1] < 0.08) {
+          p.array[i * 3 + 1] = Math.random() * 9 + 0.8;
+          p.array[i * 3 + 0] = (Math.random() - 0.5) * 18;
+          p.array[i * 3 + 2] = (Math.random() - 0.5) * 18;
+        }
+      }
+      p.needsUpdate = true;
+
+      controls.update();
+
+      // render with bloom
+      composer.render();
+    }
+
+    animate();
+  </script>
+</body>
+</html>
